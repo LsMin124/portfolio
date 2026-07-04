@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>사전 학습 커리큘럼 — 지능형제조 디지털 트윈</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">v2 기획서 기반 · 10주 프로젝트 대비</span>
+  </div>
+</header>
+
+<main>
+  <section class="hero" aria-labelledby="hero-heading">
+    <div class="wrap">
+      <p class="hero__eyebrow">Intelligent Manufacturing Twin — Prerequisites</p>
+      <h1 id="hero-heading">프로젝트를 시작할 수 있는 몸을 만드는<br>9단계 사전 학습 로드맵</h1>
+      <p class="lede">
+        각 스텝의 실습 미션은 그 자체가 프로젝트 부품의 프로토타입이 되도록 설계했다.
+        학습이 끝나면 버릴 코드가 아니라, 1주차부터 바로 이어 쓸 수 있는 초석이 남는다.
+        순서는 v2 기획서의 10주 로드맵과 정렬되어 있다.
+      </p>
+      <div class="progress-shell">
+        <div class="progress-track" role="progressbar" aria-label="전체 학습 진행률">
+          <div class="progress-fill" data-progress-fill></div>
+        </div>
+        <div class="progress-label">
+          <span>전체 진행률</span>
+          <span data-progress-percent>0%</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="phase" data-ph="a" aria-labelledby="ph-a">
+    <div class="wrap">
+      <div class="phase__head">
+        <span class="phase__key">PHASE A</span>
+        <h2 class="phase__title" id="ph-a">워밍업 — 시뮬레이션의 뼈대</h2>
+        <span class="phase__timing">프로젝트 착수 전</span>
+      </div>
+      <ul class="steps">
+        <li>
+          <a class="step-card" href="step-0-big-picture.html" data-num="00" data-progress-for="step0" data-total="5">
+            <h3>시스템 전체 그림과 용어 지도</h3>
+            <p>v2 아키텍처를 한 장으로 해부한다. 반송 오더 하나의 일생을 따라가며 모든 구성요소의 역할을 파악.</p>
+            <span class="row">
+              <span class="badge badge--ph">개념</span>
+              <span class="badge">~2h</span>
+              <span class="badge" data-done-label>0/5</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a class="step-card" href="step-1-simpy.html" data-num="01" data-progress-for="step1" data-total="6">
+            <h3>SimPy 이산사건 시뮬레이션</h3>
+            <p>env·프로세스·리소스·스토어로 미니 생산 라인을 세운다. 미션 결과물이 곧 DES 코어의 원형.</p>
+            <span class="row">
+              <span class="badge badge--ph">코딩</span>
+              <span class="badge">~10h</span>
+              <span class="badge" data-done-label>0/6</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a class="step-card" href="step-2-production-theory.html" data-num="02" data-progress-for="step2" data-total="6">
+            <h3>생산시스템 이론 최소 필수</h3>
+            <p>Little의 법칙, M/M/1, 병목, 반복 실행과 신뢰구간. what-if 응답의 수학적 근거를 만드는 스텝.</p>
+            <span class="row">
+              <span class="badge badge--ph">이론+검증</span>
+              <span class="badge">~6h</span>
+              <span class="badge" data-done-label>0/6</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="phase" data-ph="b" aria-labelledby="ph-b">
+    <div class="wrap">
+      <div class="phase__head">
+        <span class="phase__key">PHASE B</span>
+        <h2 class="phase__title" id="ph-b">파이프라인 — 데이터가 흐르는 길</h2>
+        <span class="phase__timing">프로젝트 1–2주차 병행</span>
+      </div>
+      <ul class="steps">
+        <li>
+          <a class="step-card" href="step-3-data-pipeline.html" data-num="03" data-progress-for="step3" data-total="6">
+            <h3>InfluxDB + Grafana + Docker Compose</h3>
+            <p>시계열 데이터 모델(measurement·tag·field)과 대시보드. SimPy 이벤트를 적재해 처리량 패널까지.</p>
+            <span class="row">
+              <span class="badge badge--ph">인프라</span>
+              <span class="badge">~5h</span>
+              <span class="badge" data-done-label>0/6</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="phase" data-ph="c" aria-labelledby="ph-c">
+    <div class="wrap">
+      <div class="phase__head">
+        <span class="phase__key">PHASE C</span>
+        <h2 class="phase__title" id="ph-c">로봇·3D — 트윈의 몸</h2>
+        <span class="phase__timing">ROS2는 1–2주차 병행, Isaac은 3주차 직전</span>
+      </div>
+      <ul class="steps">
+        <li>
+          <a class="step-card" href="step-4-ros2.html" data-num="04" data-progress-for="step4" data-total="6">
+            <h3>ROS2 기초 — 노드·토픽·rclpy</h3>
+            <p>pub/sub 통신 모델과 CLI 도구. 미션의 오더 발행/수행 노드 한 쌍이 DES↔Isaac 브리지의 원형.</p>
+            <span class="row">
+              <span class="badge badge--ph">코딩</span>
+              <span class="badge">~12h</span>
+              <span class="badge" data-done-label>0/6</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a class="step-card" href="step-5-isaac-sim.html" data-num="05" data-progress-for="step5" data-total="6">
+            <h3>Isaac Sim 입문 — USD·자산·ROS2 브리지</h3>
+            <p>Omniverse 개념, 창고 씬과 AMR 자산, ROS2 토픽 연결까지. 강등 게이트 대비 Gazebo 경로도 정리.</p>
+            <span class="row">
+              <span class="badge badge--ph">3D+통합</span>
+              <span class="badge">~14h</span>
+              <span class="badge" data-done-label>0/6</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="phase" data-ph="d" aria-labelledby="ph-d">
+    <div class="wrap">
+      <div class="phase__head">
+        <span class="phase__key">PHASE D</span>
+        <h2 class="phase__title" id="ph-d">인터페이스·에이전트 — 트윈의 입과 뇌</h2>
+        <span class="phase__timing">프로젝트 6주차 전후</span>
+      </div>
+      <ul class="steps">
+        <li>
+          <a class="step-card" href="step-6-opcua.html" data-num="06" data-progress-for="step6" data-total="5">
+            <h3>OPC UA 개념 + asyncua 경량 서버</h3>
+            <p>주소공간·노드 모델만 정확히 잡고, 트윈 상태를 노출하는 미니 서버를 만든다. 경량 원칙 유지.</p>
+            <span class="row">
+              <span class="badge badge--ph">인터페이스</span>
+              <span class="badge">~4h</span>
+              <span class="badge" data-done-label>0/5</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a class="step-card" href="step-7-langgraph.html" data-num="07" data-progress-for="step7" data-total="6">
+            <h3>LangGraph 에이전트 — 그래프·도구·승인 게이트</h3>
+            <p>상태 그래프, 도구 호출, 인터럽트. 가짜 what-if 도구로 라우팅하는 미니 에이전트를 만든다.</p>
+            <span class="row">
+              <span class="badge badge--ph">코딩</span>
+              <span class="badge">~10h</span>
+              <span class="badge" data-done-label>0/6</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="phase" data-ph="e" aria-labelledby="ph-e">
+    <div class="wrap">
+      <div class="phase__head">
+        <span class="phase__key">PHASE E</span>
+        <h2 class="phase__title" id="ph-e">품질 — 증명 가능한 에이전트</h2>
+        <span class="phase__timing">프로젝트 8주차 전후</span>
+      </div>
+      <ul class="steps">
+        <li>
+          <a class="step-card" href="step-8-evaluation.html" data-num="08" data-progress-for="step8" data-total="5">
+            <h3>LLM 에이전트 평가 방법론</h3>
+            <p>평가셋 설계, 라우팅 정확도·groundedness·게이트 준수율 정의와 채점 하네스 구조.</p>
+            <span class="row">
+              <span class="badge badge--ph">방법론</span>
+              <span class="badge">~5h</span>
+              <span class="badge" data-done-label>0/5</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="phase" aria-labelledby="howto">
+    <div class="wrap">
+      <div class="phase__head">
+        <span class="phase__key">사용법</span>
+        <h2 class="phase__title" id="howto">이 커리큘럼을 쓰는 방법</h2>
+      </div>
+      <div class="callout callout--why" style="max-width: 46rem;">
+        <span class="callout__tag">RULES OF ENGAGEMENT</span>
+        <ul>
+          <li><strong>순서 고정, 깊이 가변</strong> — 스텝 순서는 지키되, 이미 아는 내용은 체크리스트로 자가 점검만 하고 넘어간다.</li>
+          <li><strong>실습 미션이 본체</strong> — 읽기만 하고 넘어가면 남는 게 없다. 미션 산출물은 <code>~/imtwin-warmup/</code> 같은 연습 저장소에 커밋해둔다.</li>
+          <li><strong>막히면 시간 박스</strong> — 한 이슈에 2시간 이상 막히면 기록하고 다음으로. 완벽주의는 v2 기획서 §9의 최대 리스크다.</li>
+          <li>체크 상태는 이 브라우저의 localStorage에 저장된다 (다른 브라우저·시크릿 모드에서는 초기화).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    지능형제조 디지털 트윈 포트폴리오 — 사전 학습 자료 · 기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2, 2026-07)
+  </div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>

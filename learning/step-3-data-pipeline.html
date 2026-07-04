@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 3 — InfluxDB + Grafana + Docker Compose</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="step3">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">Phase B · 1–2주차 병행</span>
+  </div>
+</header>
+
+<main class="wrap wrap--narrow" style="--ph: var(--ph-b);">
+  <section class="step-hero">
+    <p class="step-hero__num">03</p>
+    <h1>시계열 파이프라인 — InfluxDB, Grafana, Docker Compose</h1>
+    <div class="row">
+      <span class="badge badge--ph">인프라</span>
+      <span class="badge">~5h</span>
+      <span class="badge">v2 §4.2(c) 데이터 계층</span>
+      <span class="badge check-count" data-check-count></span>
+    </div>
+  </section>
+
+  <article class="prose">
+    <h2>학습 목표</h2>
+    <ul>
+      <li>시계열 DB의 데이터 모델(measurement / tag / field / timestamp)을 설계 기준과 함께 이해한다.</li>
+      <li>Docker Compose로 InfluxDB + Grafana 스택을 원커맨드 기동한다.</li>
+      <li>파이썬 클라이언트로 SimPy 이벤트 로그를 적재한다 — 시뮬레이션 시간 매핑 문제 포함.</li>
+      <li>Grafana에서 처리량·WIP 패널을 만든다.</li>
+    </ul>
+
+    <div class="callout callout--why">
+      <span class="callout__tag">프로젝트와의 연결 — v2 §4.2(c)</span>
+      <p>트윈의 모든 이벤트(오더 발행·완료, AMR 상태, 스테이션 지표)가 이 파이프라인에 쌓이고,
+      에이전트의 시계열 조회 도구가 이 DB를 읽는다. 여기서 만드는 compose 파일이
+      프로젝트 저장소의 <code>docker-compose.yml</code> 초안이다.</p>
+    </div>
+
+    <h2>1. 왜 시계열 DB인가</h2>
+    <p>트윈 데이터의 질의는 거의 전부 "<strong>어느 시간 범위</strong>의 <strong>어느 대상</strong> 지표"다.
+    시계열 DB는 시간을 1차 축으로 두고 대량 삽입과 시간 범위 스캔에 최적화되어 있고,
+    보존 정책(오래된 데이터 자동 삭제)과 다운샘플링을 기본기로 제공한다.
+    범용 RDB로도 되지만, 이 프로젝트에선 "제조 데이터 스택다움"도 선택 이유다.</p>
+
+    <h2>2. InfluxDB 데이터 모델 — tag와 field의 구분이 전부</h2>
+    <p>한 레코드(포인트)는 <code>measurement + tags + fields + timestamp</code>로 구성된다.
+    라인 프로토콜로 보면 구조가 명확하다:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>line protocol — 합성 예시</div>
+      <pre><code>line_state,station=ST1 wip=3i,util=0.83 1751360400000000000
+transport,amr=amr01,from=ST1,to=ST2 duration_s=42.5 1751360442000000000
+─────────  ──────────────  ─────────────────  ───────────────────
+measurement      tags            fields        timestamp (ns)</code></pre>
+    </div>
+    <ul>
+      <li><strong>tag</strong> — 필터·그룹핑 기준 (스테이션명, AMR ID, 시나리오명). 인덱싱되며 항상 문자열.</li>
+      <li><strong>field</strong> — 실제 측정값 (WIP, 가동률, 반송 시간). 인덱싱되지 않는다.</li>
+      <li>판단 기준: <em>WHERE/GROUP BY에 쓸 것인가?</em> → tag. <em>집계할 수치인가?</em> → field.</li>
+      <li><strong>고카디널리티 주의</strong> — 부품 ID처럼 값이 무한히 늘어나는 것을 tag로 두면 인덱스가 폭발한다. field로 두거나 저장을 재고하라.</li>
+    </ul>
+
+    <div class="callout callout--ver">
+      <span class="callout__tag">버전 확인 포인트 — 2.x vs 3.x</span>
+      <p>InfluxDB는 2.x(질의 언어 Flux)와 3.x(SQL 계열) 세대가 갈린다. v2 기획서의 에이전트 조회 도구는
+      Text-to-Flux를 가정하므로 <strong>학습은 2.x 기준으로 시작</strong>하되, 프로젝트 착수 시점에
+      버전·질의 언어를 최종 확정하라 (Text-to-SQL로 바꿔도 도구 구조는 동일하다). 데이터 모델 개념은 두 세대가 같다.</p>
+    </div>
+
+    <h2>3. Docker Compose — 원커맨드 스택</h2>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>docker-compose.yml</div>
+      <pre><code>services:
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUX_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: imtwin
+      DOCKER_INFLUXDB_INIT_BUCKET: factory
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+    volumes:
+      - influx-data:/var/lib/influxdb2
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - influxdb
+
+volumes:
+  influx-data:
+  grafana-data:</code></pre>
+    </div>
+    <p>비밀값은 같은 폴더의 <code>.env</code> 파일에 두고(<code>INFLUX_USER=...</code> 형식),
+    <strong><code>.env</code>는 반드시 <code>.gitignore</code>에 추가</strong>한다.
+    compose 파일에 토큰을 직접 적는 순간 그 저장소는 공개할 수 없게 된다.
+    이미지 태그는 예시이니 착수 시점의 안정 버전으로 고정하라 (latest 금지 — 재현성).</p>
+
+    <h2>4. 파이썬 적재 — 시뮬레이션 시간을 어디에 매핑할 것인가</h2>
+    <p>여기가 이 스텝의 실전 포인트다. SimPy의 시각은 0에서 시작하는 논리 시간(분)이고,
+    InfluxDB는 실제 타임스탬프를 요구한다. 관례적 해법은 <strong>가상 기준 시각(sim epoch)을 정해 오프셋</strong>하는 것:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>ingest.py — 시뮬레이션 로그 백필</div>
+      <pre><code>import os
+from datetime import datetime, timedelta, timezone
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
+
+SIM_EPOCH = datetime(2026, 7, 1, 9, 0, tzinfo=timezone.utc)
+
+def sim_to_ts(sim_minutes):
+    return SIM_EPOCH + timedelta(minutes=sim_minutes)
+
+client = InfluxDBClient(
+    url="http://localhost:8086",
+    token=os.environ["INFLUX_TOKEN"],   # 하드코딩 금지
+    org="imtwin",
+)
+write = client.write_api(write_options=SYNCHRONOUS)
+
+# wip_rows: Step 1 미션에서 쌓은 [(sim_t, station, wip)] 리스트
+for sim_t, station, wip in wip_rows:
+    point = (
+        Point("line_state")
+        .tag("station", station)
+        .field("wip", int(wip))
+        .time(sim_to_ts(sim_t))
+    )
+    write.write(bucket="factory", record=point)
+
+client.close()</code></pre>
+    </div>
+    <p>운영 모드는 두 가지가 있고 프로젝트에서 둘 다 쓰게 된다:</p>
+    <ul>
+      <li><strong>백필(batch)</strong> — what-if처럼 고속으로 돌린 결과를 한 번에 적재. 위 코드 방식.</li>
+      <li><strong>실시간 재생(streaming)</strong> — 데모용. 시뮬레이션을 벽시계 속도에 맞춰 돌리며(예: SimPy 1분 = 실제 1초) 이벤트 발생 즉시 현재 시각으로 적재.</li>
+    </ul>
+
+    <h2>5. Grafana — 첫 대시보드</h2>
+    <ol>
+      <li><code>localhost:3000</code> 접속 → 초기 비밀번호 변경.</li>
+      <li>Data source에 InfluxDB 추가 (URL은 컨테이너 네트워크상 <code>http://influxdb:8086</code>, 토큰·org·bucket 입력).</li>
+      <li>패널 1: 스테이션별 WIP 시계열 (tag <code>station</code>으로 그룹).</li>
+      <li>패널 2: 시간당 처리량 (완성 이벤트 카운트를 1h 윈도우로 집계).</li>
+      <li>대시보드를 JSON으로 export해 저장소에 커밋 — 대시보드도 코드다.</li>
+    </ol>
+
+    <div class="callout callout--warn">
+      <span class="callout__tag">흔한 함정</span>
+      <ul>
+        <li>타임스탬프 정밀도 — 클라이언트/DB의 기본 단위(ns)와 직접 만든 정수 타임스탬프가 안 맞으면 1970년이나 먼 미래에 데이터가 찍힌다.</li>
+        <li>Grafana의 기본 시간 창은 "최근 6시간" — SIM_EPOCH를 과거로 잡았으면 시간 범위를 그 근처로 옮겨야 데이터가 보인다.</li>
+        <li>볼륨 없이 컨테이너를 지우면 데이터가 같이 사라진다.</li>
+        <li>부품 ID를 tag로 넣는 고카디널리티 실수 (위 §2 참고).</li>
+      </ul>
+    </div>
+
+    <section class="mission" aria-labelledby="mission-h">
+      <span class="mission__tag">MISSION 03</span>
+      <h3 id="mission-h">미니 라인을 대시보드에 띄우기</h3>
+      <ol>
+        <li><code>docker compose up -d</code> 한 번으로 InfluxDB + Grafana가 뜨는 compose 파일을 작성한다 (.env 분리 포함).</li>
+        <li>Step 1 미니 라인의 이벤트 로그(WIP 변화, 완성, 반송 오더 스텁)를 스키마 설계 후 적재한다 — measurement·tag·field 선택 이유를 주석으로 남긴다.</li>
+        <li>Grafana에 WIP 패널과 시간당 처리량 패널을 만든다.</li>
+        <li>고장 시나리오(ST2 MTTR 2배)를 다시 돌려 적재하고, 대시보드에서 고장 구간이 시각적으로 보이는지 확인한다.</li>
+        <li>대시보드 JSON을 export해 연습 저장소에 커밋한다.</li>
+        <li>스택 전체를 내렸다 올려도(<code>down</code> → <code>up</code>) 데이터와 대시보드가 살아있는지 확인한다.</li>
+      </ol>
+    </section>
+
+    <h2>자가 점검</h2>
+    <ul class="checks">
+      <li><label><input type="checkbox" data-key="1"><span>tag와 field의 선택 기준을 예시와 함께 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="2"><span>compose 원커맨드로 스택이 뜨고, 시크릿은 .env로 분리되어 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="3"><span>시뮬레이션 시간 → 실제 타임스탬프 매핑을 구현했다.</span></label></li>
+      <li><label><input type="checkbox" data-key="4"><span>Grafana에 WIP·처리량 패널이 뜬다.</span></label></li>
+      <li><label><input type="checkbox" data-key="5"><span>고장 구간이 대시보드에서 식별된다.</span></label></li>
+      <li><label><input type="checkbox" data-key="6"><span>재기동 후에도 데이터·대시보드가 유지된다.</span></label></li>
+    </ul>
+
+    <nav class="pager" aria-label="스텝 이동">
+      <a href="step-2-production-theory.html"><span class="dir">← 이전</span><span class="t">Step 2 · 생산시스템 이론</span></a>
+      <a class="next" href="step-4-ros2.html"><span class="dir">다음 →</span><span class="t">Step 4 · ROS2 기초</span></a>
+    </nav>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap wrap--narrow">기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2)</div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 6 — OPC UA 개념과 asyncua 경량 서버</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="step6">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">Phase D · 6주차 전</span>
+  </div>
+</header>
+
+<main class="wrap wrap--narrow" style="--ph: var(--ph-d);">
+  <section class="step-hero">
+    <p class="step-hero__num">06</p>
+    <h1>OPC UA — 트윈에 산업 표준 창구 달기 (경량)</h1>
+    <div class="row">
+      <span class="badge badge--ph">인터페이스</span>
+      <span class="badge">~4h</span>
+      <span class="badge">v2 §4.2(c) — 경량 원칙</span>
+      <span class="badge check-count" data-check-count></span>
+    </div>
+  </section>
+
+  <article class="prose">
+    <h2>학습 목표</h2>
+    <ul>
+      <li>OPC UA가 무엇이고 이 프로젝트에서 왜 "경량"으로만 쓰는지 설명할 수 있다.</li>
+      <li>주소공간·노드·NodeId 개념으로 서버 구조를 읽을 수 있다.</li>
+      <li>asyncua로 트윈 상태를 노출하는 미니 서버를 만들 수 있다.</li>
+      <li>GUI 클라이언트로 접속해 브라우즈·값 확인을 할 수 있다.</li>
+    </ul>
+
+    <div class="callout callout--why">
+      <span class="callout__tag">프로젝트와의 연결 — v2 §4.2(c), 면접 방어 4번</span>
+      <p>"PLC 없는 트윈이 현실성 있나?"에 대한 답이 이 창구다. 트윈 상태를 OPC UA로 노출하면
+      "실물 설비·상위 시스템과 연동 가능한 표준 인터페이스를 갖췄다"고 말할 수 있다.
+      단, v2의 결정은 <strong>경량 유지</strong> — 정보 모델을 파고들지 않고 창구의 존재만 증명한다.
+      여기 시간을 쓰는 만큼 지능형제조 코어(what-if·에이전트)에서 시간이 빠진다는 걸 기억하라.</p>
+    </div>
+
+    <h2>1. OPC UA 3분 요약</h2>
+    <p>OPC UA는 산업 장비의 데이터와 제어를 <strong>표준화된 트리(주소공간)</strong>로 노출하는 프로토콜이다.
+    장비(또는 트윈) 쪽이 <strong>서버</strong>가 되어 자기 상태를 노드로 공개하고,
+    SCADA/MES/분석 시스템이 <strong>클라이언트</strong>로 접속해 브라우즈·읽기·쓰기·구독한다.
+    벤더 중립이라 "어느 회사 장비든 같은 방식으로 읽는다"는 게 존재 이유다.</p>
+    <p>우리 트윈이 서버가 된다 = <strong>가상 공장이 실제 공장 설비와 똑같은 방식으로 말을 건다</strong>는 뜻.
+    이식 가능성 서사가 여기서 나온다.</p>
+
+    <h2>2. 주소공간 — 폴더 트리라고 생각하면 80%는 맞다</h2>
+    <ul>
+      <li>서버의 루트 아래 <code>Objects</code> 폴더가 있고, 그 밑에 <strong>Object</strong>(폴더 역할)와 <strong>Variable</strong>(값)이 트리를 이룬다.</li>
+      <li>모든 노드는 <strong>NodeId</strong>(네임스페이스 인덱스 + 식별자)로 유일하게 지목된다 — 예: <code>ns=2;i=15</code>.</li>
+      <li>클라이언트는 트리를 <strong>브라우즈</strong>해서 구조를 발견하고, 관심 변수를 <strong>구독</strong>하면 변경 시 알림을 받는다.</li>
+    </ul>
+    <p>우리가 노출할 최소 트리:</p>
+    <div class="diagram" role="img" aria-label="OPC UA 주소공간 트리">
+Objects
+└── Line1
+    ├── ThroughputPerHour   (Double, 읽기)
+    ├── WIP                 (Int64,  읽기)
+    ├── ActiveOrders        (Int64,  읽기)
+    └── TargetAmrCount      (Int64,  쓰기 가능 — 승인 게이트 제어 지점)
+    </div>
+
+    <h2>3. asyncua — 미니 서버 만들기</h2>
+    <p>asyncua는 asyncio 기반이다. <code>async/await</code>가 처음이면 "await = 이 작업이 끝날 때까지
+    다른 일 하러 감"으로 읽고 시작하면 된다:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>twin_opcua_server.py</div>
+      <pre><code>import asyncio
+from asyncua import Server
+
+async def main():
+    server = Server()
+    await server.init()
+    server.set_endpoint("opc.tcp://0.0.0.0:4840/imtwin/")
+
+    ns = await server.register_namespace("http://imtwin.example/factory")
+
+    line = await server.nodes.objects.add_object(ns, "Line1")
+    throughput = await line.add_variable(ns, "ThroughputPerHour", 0.0)
+    wip        = await line.add_variable(ns, "WIP", 0)
+    target_amr = await line.add_variable(ns, "TargetAmrCount", 2)
+    await target_amr.set_writable()      # 이 노드만 클라이언트 쓰기 허용
+
+    async with server:
+        tick = 0
+        while True:
+            await asyncio.sleep(5)
+            tick += 1
+            # 학습용 합성값 — 프로젝트에선 DES 통계가 들어온다
+            await throughput.write_value(10.0 + (tick % 5) * 0.5)
+            await wip.write_value(3 + tick % 4)
+
+asyncio.run(main())</code></pre>
+    </div>
+    <p>프로젝트에서는 합성값 자리에 DES 코어의 실시간 통계가 들어가고,
+    <code>TargetAmrCount</code> 같은 쓰기 가능 노드가 에이전트 승인 게이트 제어의 물리적 종착지가 된다.</p>
+
+    <h2>4. 확인 — 클라이언트로 접속해보기</h2>
+    <ul>
+      <li><strong>UaExpert</strong>(무료 GUI 클라이언트)를 설치해 <code>opc.tcp://localhost:4840/imtwin/</code>에 접속 → Objects 트리 브라우즈 → 변수를 Data Access View에 끌어다 놓으면 5초마다 갱신되는 게 보인다.</li>
+      <li>파이썬으로도 확인 가능: <code>asyncua.Client</code>로 접속해 <code>get_node</code> → <code>read_value()</code> 몇 줄이면 된다 — 에이전트의 제어 도구가 이 클라이언트 코드의 연장이다.</li>
+    </ul>
+
+    <div class="callout callout--warn">
+      <span class="callout__tag">흔한 함정 + 경량의 경계선</span>
+      <ul>
+        <li>학습 서버는 익명 접속(보안 없음)이다 — 로컬 학습용으로만. README에 "보안 모드는 범위 외, 실배포 시 인증서 기반 필수"라고 명시하는 것 자체가 이해의 증거다.</li>
+        <li>갱신 루프에서 <code>time.sleep</code>을 쓰면 서버 전체가 멈춘다 — 반드시 <code>await asyncio.sleep</code>.</li>
+        <li>포트 4840이 이미 점유되어 있으면 조용히 실패할 수 있다.</li>
+        <li><strong>여기까지가 경량이다</strong> — 컴패니언 스펙, ISA-95 전체 계층, 이력(Historical Access)은 전부 확장 목록. 파고들기 시작하면 v1의 무게중심으로 회귀하는 것이다.</li>
+      </ul>
+    </div>
+
+    <section class="mission" aria-labelledby="mission-h">
+      <span class="mission__tag">MISSION 06</span>
+      <h3 id="mission-h">트윈 상태 창구 열기</h3>
+      <ol>
+        <li>위 미니 서버를 돌리고 UaExpert로 접속해 트리 브라우즈 화면을 캡처한다.</li>
+        <li>파이썬 클라이언트 스크립트로 <code>ThroughputPerHour</code>를 읽고, <code>TargetAmrCount</code>에 값을 써본다 (쓰기 가능/불가 노드의 차이 체감).</li>
+        <li>Step 1 미니 라인을 실시간 재생 모드(예: 시뮬레이션 1분 = 실제 0.5초)로 돌리며 통계를 서버 변수로 갱신한다 — 트윈 상태가 표준 창구로 흐르는 첫 경험.</li>
+        <li>노드 구조(NodeId, 타입, 접근 권한)를 표로 정리해 연습 저장소 README에 남긴다.</li>
+      </ol>
+    </section>
+
+    <h2>자가 점검</h2>
+    <ul class="checks">
+      <li><label><input type="checkbox" data-key="1"><span>서버/클라이언트 역할과 브라우즈·구독 개념을 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="2"><span>미니 서버가 돌고 UaExpert에서 값 갱신이 보인다.</span></label></li>
+      <li><label><input type="checkbox" data-key="3"><span>쓰기 가능 노드와 읽기 전용 노드를 구분해 만들었다.</span></label></li>
+      <li><label><input type="checkbox" data-key="4"><span>파이썬 클라이언트로 읽기/쓰기를 수행했다.</span></label></li>
+      <li><label><input type="checkbox" data-key="5"><span>"경량의 경계선"(무엇을 일부러 안 하는지)을 말할 수 있다.</span></label></li>
+    </ul>
+
+    <nav class="pager" aria-label="스텝 이동">
+      <a href="step-5-isaac-sim.html"><span class="dir">← 이전</span><span class="t">Step 5 · Isaac Sim 입문</span></a>
+      <a class="next" href="step-7-langgraph.html"><span class="dir">다음 →</span><span class="t">Step 7 · LangGraph 에이전트</span></a>
+    </nav>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap wrap--narrow">기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2)</div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>

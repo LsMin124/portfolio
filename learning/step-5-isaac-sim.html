@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 5 — Isaac Sim 입문</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="step5">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">Phase C · 3주차 직전</span>
+  </div>
+</header>
+
+<main class="wrap wrap--narrow" style="--ph: var(--ph-c);">
+  <section class="step-hero">
+    <p class="step-hero__num">05</p>
+    <h1>Isaac Sim 입문 — 트윈에 몸을 입히기</h1>
+    <div class="row">
+      <span class="badge badge--ph">3D+통합</span>
+      <span class="badge">~14h</span>
+      <span class="badge">최대 리스크 구간 — 시간 박스 필수</span>
+      <span class="badge check-count" data-check-count></span>
+    </div>
+  </section>
+
+  <article class="prose">
+    <h2>학습 목표</h2>
+    <ul>
+      <li>Omniverse/USD의 핵심 개념(스테이지, prim, 레이어)을 이해한다.</li>
+      <li>Isaac Sim을 설치하고 prebuilt 자산(창고, AMR)으로 씬을 구성한다.</li>
+      <li>ROS2 브리지를 활성화해 시뮬레이션 속 로봇을 토픽으로 움직인다.</li>
+      <li>강등 게이트(→ Gazebo)의 판단 기준과 전환 비용을 이해한다.</li>
+    </ul>
+
+    <div class="callout callout--why">
+      <span class="callout__tag">프로젝트와의 연결 — v2 §4.2(b), §6 게이트</span>
+      <p>디지털트윈 직무에서 3D 데모 영상은 가장 강한 한 방이고, Isaac Sim(Omniverse)은 그 자체가 채용 키워드다.
+      동시에 <strong>v2 기획서가 지정한 최대 리스크</strong>이기도 하다. 이 스텝의 목표는 마스터가 아니라
+      "오더를 받으면 움직이는 로봇이 있는 창고 씬" — 그 이상은 프로젝트 3–5주차의 몫이다.</p>
+    </div>
+
+    <h2>1. Omniverse와 USD — 세계관 먼저</h2>
+    <p>Isaac Sim은 NVIDIA Omniverse 플랫폼 위에 올라간 로봇 시뮬레이터다. 밑바닥에 깔린 개념이 <strong>USD</strong>(Universal Scene Description, 픽사가 만든 3D 장면 기술 체계)라서, 어휘 몇 개만 잡으면 UI 전체가 읽힌다:</p>
+    <ul>
+      <li><strong>스테이지(Stage)</strong> — 지금 열려 있는 장면 전체. 하나의 USD 파일 트리다.</li>
+      <li><strong>프림(Prim)</strong> — 스테이지 트리의 모든 노드 (로봇, 바닥, 조명, 카메라). 각 prim은 속성(위치, 물리, 재질)을 가진다.</li>
+      <li><strong>레이어 합성</strong> — 원본을 건드리지 않고 위에 겹쳐서 수정하는 비파괴 편집. 참조(Reference)로 기존 자산을 씬에 "링크"해 쓴다 — 우리가 창고와 로봇을 가져다 쓰는 메커니즘.</li>
+      <li><strong>물리(PhysX)</strong> — Play 버튼을 눌러야 물리가 돈다. <em>"로봇이 안 움직여요"의 절반은 Play를 안 누른 것.</em></li>
+    </ul>
+    <p>면접 어휘로: "USD 기반 씬 그래프 위에서 prebuilt 자산을 참조로 합성해 씬을 구성했다"까지 말할 수 있으면 충분하다.</p>
+
+    <h2>2. 설치 — 하루를 배정하라</h2>
+    <ul>
+      <li><strong>요구사항</strong>: RTX GPU 필수 (RTX 5080 충분), 최신 NVIDIA 드라이버, 디스크 수십 GB, RAM 32GB 권장.</li>
+      <li><strong>첫 실행은 원래 느리다</strong> — 셰이더 컴파일에 수 분에서 수십 분. 멈춘 게 아니다.</li>
+      <li>설치 검증: 빈 스테이지에 큐브 하나 추가 → Play → 중력으로 떨어지면 물리까지 정상.</li>
+    </ul>
+    <div class="callout callout--ver">
+      <span class="callout__tag">버전 확인 포인트 (중요)</span>
+      <p>Isaac Sim은 오픈소스화(2025) 이후 배포 방식·확장(Extension) 이름이 버전마다 달라져 왔다.
+      설치 방법(pip/바이너리/컨테이너), 지원 ROS2 배포판, RTX 50 시리즈 드라이버 호환은
+      <strong>반드시 착수 시점의 공식 문서 기준</strong>으로 확인하라. 이 페이지는 개념과 작업 순서만 제공한다.</p>
+    </div>
+
+    <h2>3. 첫 씬 — 만들지 말고 가져와라</h2>
+    <p>v2 기획서의 원칙: <strong>직접 모델링 최소화, prebuilt 자산 최대 활용.</strong> 작업 순서:</p>
+    <ol>
+      <li>자산 브라우저(Isaac Assets)에서 <strong>창고(warehouse) 환경</strong>을 검색해 스테이지에 로드한다.</li>
+      <li>로봇 자산에서 AMR을 추가한다 — <strong>Nova Carter</strong> 계열이 레퍼런스 AMR 자산이다 (버전에 따라 명칭·구성 상이).</li>
+      <li>Stage 트리에서 로봇 prim을 선택해 위치를 옮겨보고, Property 패널에서 속성 구조를 훑어본다.</li>
+      <li>Play를 누르고 물리가 도는 상태에서 로봇이 바닥에 안착해 있는지 확인한다.</li>
+    </ol>
+    <p>여기서 씬을 꾸미고 싶은 유혹이 온다. <strong>참아라.</strong> 씬 1개 원칙(§9)은 이 유혹 때문에 존재한다.</p>
+
+    <h2>4. Python 스크립팅 — 두 가지 모드</h2>
+    <ul>
+      <li><strong>GUI Script Editor</strong> — 실행 중인 씬에 파이썬을 바로 쏘는 REPL. prim 조작, 위치 읽기 같은 실험은 전부 여기서. 학습 단계의 주력.</li>
+      <li><strong>Standalone/Headless</strong> — 스크립트가 시뮬레이터를 직접 기동·제어. 재현 가능한 데모와 자동화용. 프로젝트 후반(데모 영상 뽑기)에 필요해진다.</li>
+    </ul>
+
+    <h2>5. ROS2 브리지 — 두 세계를 잇는 순간</h2>
+    <p>Isaac Sim의 ROS2 Bridge 확장을 활성화하면 시뮬레이션 안의 로봇·센서가 ROS2 토픽으로 노출된다.
+    확인 절차는 Step 4에서 배운 도구 그대로:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>terminal — 브리지 검증</div>
+      <pre><code># Isaac Sim 실행 + ROS2 Bridge 확장 활성화 + Play 상태에서:
+ros2 topic list                    # /cmd_vel, /odom 계열이 보여야 함
+ros2 topic echo /odom              # 로봇 위치가 흐르는지 확인
+
+# 키보드로 로봇 몰아보기 (조향 데모의 표준 도구):
+ros2 run teleop_twist_keyboard teleop_twist_keyboard</code></pre>
+    </div>
+    <p>토픽이 안 보이면 순서대로 의심하라: ① Play 상태인가 ② 브리지 확장이 켜져 있나
+    ③ Isaac과 터미널의 ROS2 배포판이 일치하나 ④ <code>ROS_DOMAIN_ID</code>가 같나 ⑤ QoS 불일치(Step 4) 아닌가.</p>
+
+    <h2>6. 강등 게이트 — 자존심이 아니라 설계다</h2>
+    <p>v2 로드맵의 게이트: <strong>프로젝트 4주차 말까지 "오더 수신 → AMR A→B 반송 → 완료 회신"이 안 되면 Gazebo로 전환.</strong>
+    전환 비용이 작은 이유는 아키텍처에 있다 — DES와 시뮬레이터는 토픽 계약(<code>/transport/order</code>, <code>/transport/done</code>)으로만 묶여 있어서,
+    Isaac을 빼고 Gazebo(+Nav2 튜토리얼 스택)를 꽂아도 브리지·DES·파이프라인·에이전트는 전부 그대로다.
+    Gazebo Harmonic + Nav2는 문서와 커뮤니티 자료의 왕도가 있으니, 게이트 발동은 실패가 아니라 리스크 관리가 작동한 것이다.</p>
+
+    <div class="callout callout--warn">
+      <span class="callout__tag">흔한 함정</span>
+      <ul>
+        <li>Play 없이 "왜 안 움직이지" 30분 — 물리는 Play 상태에서만 돈다.</li>
+        <li>커스텀 로봇/커스텀 창고 모델링 시작 — 즉시 중단하라. prebuilt가 원칙이다.</li>
+        <li>렌더 품질 욕심으로 프레임 저하 — 학습·개발 중엔 렌더 세팅을 낮춰라. 예쁜 화면은 데모 영상 찍을 때만.</li>
+        <li>드라이버/버전 불일치로 크래시 — 버전 조합(드라이버·Isaac·ROS2)을 기록해두고 한 번에 하나만 바꿔라.</li>
+        <li>시간 박스 위반 — 이 스텝 전체가 안 풀려도 Gazebo 경로가 있다. 매몰비용에 끌려가지 마라.</li>
+      </ul>
+    </div>
+
+    <section class="mission" aria-labelledby="mission-h">
+      <span class="mission__tag">MISSION 05</span>
+      <h3 id="mission-h">움직이는 창고 — 브리지 원형에 진짜 로봇 꽂기</h3>
+      <ol>
+        <li>Isaac Sim을 설치하고 큐브 낙하로 물리를 검증한다 (버전 조합 기록).</li>
+        <li>창고 환경 + AMR 자산으로 씬을 구성하고 저장한다.</li>
+        <li>ROS2 브리지를 켜고 <code>teleop_twist_keyboard</code>로 로봇을 몰아본다.</li>
+        <li>Script Editor에서 로봇 prim의 위치를 읽고 출력해본다 — "시뮬레이션 상태를 코드로 읽는" 첫 경험.</li>
+        <li>(도전) Step 4의 <code>amr_mock</code>을 대체하는 최소 노드를 만든다: <code>/transport/order</code> 수신 시 <code>/cmd_vel</code>로 로봇을 몇 초 전진시키고 <code>/transport/done</code>을 발행. 내비게이션 없이 직진이면 충분하다 — 루프가 닫히는 게 목적.</li>
+        <li>주행 장면을 30초 영상/GIF로 남긴다 — 첫 데모 자산.</li>
+      </ol>
+    </section>
+
+    <h2>자가 점검</h2>
+    <ul class="checks">
+      <li><label><input type="checkbox" data-key="1"><span>스테이지/프림/참조 합성을 자기 말로 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="2"><span>설치 검증(큐브 낙하)을 통과했고 버전 조합을 기록했다.</span></label></li>
+      <li><label><input type="checkbox" data-key="3"><span>창고 + AMR 씬이 저장되어 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="4"><span>teleop으로 로봇을 움직였고 /odom이 흐르는 것을 확인했다.</span></label></li>
+      <li><label><input type="checkbox" data-key="5"><span>브리지 문제 시 의심 순서 5가지를 말할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="6"><span>강등 게이트의 기준·시점·전환 비용을 설명할 수 있다.</span></label></li>
+    </ul>
+
+    <nav class="pager" aria-label="스텝 이동">
+      <a href="step-4-ros2.html"><span class="dir">← 이전</span><span class="t">Step 4 · ROS2 기초</span></a>
+      <a class="next" href="step-6-opcua.html"><span class="dir">다음 →</span><span class="t">Step 6 · OPC UA 경량 서버</span></a>
+    </nav>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap wrap--narrow">기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2)</div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>

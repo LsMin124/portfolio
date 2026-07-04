@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 4 — ROS2 기초</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="step4">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">Phase C · 1–2주차 병행 시작</span>
+  </div>
+</header>
+
+<main class="wrap wrap--narrow" style="--ph: var(--ph-c);">
+  <section class="step-hero">
+    <p class="step-hero__num">04</p>
+    <h1>ROS2 기초 — 오더가 흐르는 길 만들기</h1>
+    <div class="row">
+      <span class="badge badge--ph">코딩</span>
+      <span class="badge">~12h</span>
+      <span class="badge">v2 로드맵: 1–2주차 병행 (일 1–2h)</span>
+      <span class="badge check-count" data-check-count></span>
+    </div>
+  </section>
+
+  <article class="prose">
+    <h2>학습 목표</h2>
+    <ul>
+      <li>ROS2의 통신 모델(노드·토픽·서비스·액션)을 구분하고 용도를 설명할 수 있다.</li>
+      <li>Ubuntu에 ROS2를 설치하고 환경을 잡을 수 있다.</li>
+      <li>rclpy로 퍼블리셔/서브스크라이버 노드 한 쌍을 작성할 수 있다.</li>
+      <li>CLI 도구(<code>ros2 topic</code>, <code>rqt_graph</code>)로 시스템을 관측할 수 있다.</li>
+      <li>"외부 시스템 ↔ ROS2 브리지"의 구조를 코드로 감 잡는다.</li>
+    </ul>
+
+    <div class="callout callout--why">
+      <span class="callout__tag">프로젝트와의 연결 — v2 §4.1</span>
+      <p>DES가 발행한 반송 오더는 ROS2 토픽을 타고 Isaac의 AMR에게 가고, 완료 이벤트는 반대로 돌아온다.
+      이 스텝의 미션(오더 발행 노드 + 가짜 AMR 노드)이 <strong>그 브리지의 원형</strong>이다 —
+      Step 5에서 가짜 AMR 자리에 진짜 Isaac AMR을 꽂으면 코-시뮬레이션이 완성된다.
+      로봇 직군 어필의 실체이기도 하다.</p>
+    </div>
+
+    <h2>1. ROS2는 OS가 아니다</h2>
+    <p>ROS2는 로봇 소프트웨어를 <strong>작은 프로그램(노드)들의 통신망</strong>으로 짜게 해주는
+    미들웨어 + 도구 모음 + 생태계다. 통신은 DDS라는 산업용 pub/sub 표준 위에서 돌고,
+    노드들은 중앙 서버 없이 서로를 자동 발견한다. 핵심 어휘 세 개:</p>
+    <ul>
+      <li><strong>노드(node)</strong> — 한 가지 일을 하는 프로그램 단위 (오더 발행기, AMR 컨트롤러).</li>
+      <li><strong>토픽(topic)</strong> — 이름 붙은 방송 채널 (<code>/transport/order</code>). 발행자와 구독자는 서로를 몰라도 된다.</li>
+      <li><strong>메시지(message)</strong> — 토픽에 흐르는 타입 있는 데이터 (<code>std_msgs/msg/String</code>, <code>geometry_msgs/msg/Twist</code>).</li>
+    </ul>
+
+    <h2>2. 통신 4형태 — 언제 무엇을 쓰나</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>형태</th><th>패턴</th><th>전형적 용도</th><th>이 프로젝트에서</th></tr></thead>
+        <tbody>
+          <tr><td>토픽</td><td>스트림 방송 (N:M)</td><td>센서값, 상태, 지령 스트림</td><td>반송 오더, 완료 이벤트, AMR 위치 — <strong>주력</strong></td></tr>
+          <tr><td>서비스</td><td>요청 → 응답 (1회)</td><td>설정 조회, 즉답 계산</td><td>필요 시 트윈 상태 스냅숏 질의</td></tr>
+          <tr><td>액션</td><td>장기 작업 + 진행 피드백 + 취소</td><td>"X 좌표로 이동하라"</td><td>Nav2 확장 시 사용 (확장 예약)</td></tr>
+          <tr><td>파라미터</td><td>노드별 설정값</td><td>속도 한계, 토픽 이름</td><td>브리지 설정</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>설계 원칙: <strong>사전 학습과 프로젝트 코어는 토픽만으로 간다.</strong> 오더/완료를 액션으로 만드는 게 정석에 가깝지만,
+    토픽 + JSON 페이로드가 학습 마찰이 훨씬 적고 코어 요구를 충족한다. "왜 액션 안 썼나"는 확장 로드맵으로 답하면 된다.</p>
+
+    <h2>3. 설치와 환경 — 여기서 반나절 잃지 말 것</h2>
+    <ol>
+      <li>Ubuntu 24.04 기준 배포판은 <strong>Jazzy (LTS)</strong>. 공식 문서의 apt 설치 절차를 따른다 (데스크톱 풀 설치 권장: <code>ros-jazzy-desktop</code>).</li>
+      <li>설치 후 매 셸에서 <code>source /opt/ros/jazzy/setup.bash</code>가 필요하다 — <code>~/.bashrc</code>에 등록해라.</li>
+      <li>동작 확인은 공식 데모: 터미널 A에 talker, B에 listener를 띄워 메시지가 흐르면 성공.</li>
+    </ol>
+    <div class="callout callout--warn">
+      <span class="callout__tag">환경 함정 3대장</span>
+      <ul>
+        <li><code>ros2: command not found</code> — 십중팔구 source 누락이다. 새 터미널마다 의심해라.</li>
+        <li><strong>conda/venv와의 충돌</strong> — rclpy는 시스템 파이썬에 묶여 있다. ROS2 작업은 가상환경을 끄고 시스템 파이썬으로 하는 게 초심자 표준. (SimPy 쪽 venv와 섞이면 import 에러 지옥이 열린다.)</li>
+        <li>같은 네트워크의 다른 ROS2 머신과 토픽이 섞이면 <code>ROS_DOMAIN_ID</code>를 고유값으로 설정.</li>
+      </ul>
+    </div>
+
+    <h2>4. rclpy — 오더 발행자와 가짜 AMR</h2>
+    <p>노드는 <code>Node</code>를 상속한 클래스다. 아래 한 쌍이 미션의 골격이자 브리지의 원형이다:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>order_publisher.py</div>
+      <pre><code>import json
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class OrderPublisher(Node):
+    def __init__(self, orders):
+        super().__init__("order_publisher")
+        self.pub = self.create_publisher(String, "/transport/order", 10)
+        self.orders = list(orders)
+        self.timer = self.create_timer(1.0, self.tick)   # 1초마다 하나씩
+
+    def tick(self):
+        if not self.orders:
+            return
+        msg = String()
+        msg.data = json.dumps(self.orders.pop(0))
+        self.pub.publish(msg)
+        self.get_logger().info(f"오더 발행: {msg.data}")
+
+def main():
+    rclpy.init()
+    orders = [{"id": i, "src": "ST1", "dst": "ST2"} for i in range(5)]
+    node = OrderPublisher(orders)
+    rclpy.spin(node)          # 콜백 루프 — Ctrl+C로 종료
+
+if __name__ == "__main__":
+    main()</code></pre>
+    </div>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>amr_mock.py — 3초 뒤 완료를 회신하는 가짜 로봇</div>
+      <pre><code>import json
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+
+class AmrMock(Node):
+    def __init__(self):
+        super().__init__("amr_mock")
+        self.sub = self.create_subscription(
+            String, "/transport/order", self.on_order, 10)
+        self.done_pub = self.create_publisher(String, "/transport/done", 10)
+
+    def on_order(self, msg):
+        order = json.loads(msg.data)
+        self.get_logger().info(f"오더 {order['id']} 수신 — 반송 시작")
+        holder = {}
+        def finish():                      # 원샷 타이머 패턴
+            holder["t"].cancel()
+            done = String()
+            done.data = json.dumps({"id": order["id"], "status": "done"})
+            self.done_pub.publish(done)
+        holder["t"] = self.create_timer(3.0, finish)   # 주행 시간 흉내
+
+def main():
+    rclpy.init()
+    rclpy.spin(AmrMock())
+
+if __name__ == "__main__":
+    main()</code></pre>
+    </div>
+    <p>콜백 안에서 <code>time.sleep</code>으로 기다리면 노드 전체가 멈춘다 — 그래서 타이머로 완료를 지연 발행한다.
+    이 "블로킹 금지" 감각은 Isaac 브리지에서도 그대로 필요하다.</p>
+
+    <h2>5. 관측 도구 — 눈이 있어야 디버깅한다</h2>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>terminal</div>
+      <pre><code>ros2 node list                      # 살아있는 노드
+ros2 topic list                     # 흐르는 채널
+ros2 topic echo /transport/order    # 채널 도청 — 최강의 디버거
+ros2 topic hz /transport/done       # 발행 주기 측정
+ros2 interface show std_msgs/msg/String
+rqt_graph                           # 노드-토픽 연결 그래프 GUI</code></pre>
+    </div>
+    <p>QoS(서비스 품질)는 지금은 기본값으로 충분하다. 다만 <strong>Isaac/Gazebo 브리지에서 토픽이 안 보이면
+    QoS 불일치(reliability 설정)를 먼저 의심</strong>하라 — Step 5에서 다시 만난다.</p>
+
+    <div class="callout callout--ver">
+      <span class="callout__tag">버전 확인 포인트</span>
+      <p>Ubuntu 24.04 → ROS2 Jazzy (2029년까지 LTS). 프로젝트 착수 시점에 Isaac Sim이 공식 지원하는
+      ROS2 배포판을 반드시 교차 확인하라 — 시뮬레이터 쪽 지원 배포판이 선택을 지배한다.</p>
+    </div>
+
+    <section class="mission" aria-labelledby="mission-h">
+      <span class="mission__tag">MISSION 04</span>
+      <h3 id="mission-h">브리지 원형: 오더 왕복 루프</h3>
+      <ol>
+        <li>공식 튜토리얼의 talker/listener 데모로 설치를 검증한다.</li>
+        <li>위 노드 한 쌍을 ament_python 패키지(<code>imtwin_bridge</code>)로 만들어 <code>colcon build</code> → <code>ros2 run</code>으로 실행한다 (스크립트 직접 실행 말고 정석 경로로).</li>
+        <li>Step 1 미션에서 쌓은 <code>orders</code> 리스트(JSON 파일로 export)를 order_publisher가 읽어 발행하도록 바꾼다 — DES 산출물이 ROS2 세계로 들어가는 첫 순간.</li>
+        <li>세 번째 노드 <code>done_logger</code>를 추가: <code>/transport/done</code>을 구독해 (수신 시각, 오더 id)를 CSV로 기록 — Step 3 파이프라인에 적재할 수 있는 형태로.</li>
+        <li><code>rqt_graph</code>로 세 노드의 연결 그래프를 캡처해 연습 저장소에 남긴다.</li>
+        <li><code>ros2 topic echo</code>와 <code>hz</code>로 오더 흐름을 관측하고, 발행 주기를 0.2초로 줄였을 때 유실이 없는지 확인한다.</li>
+      </ol>
+    </section>
+
+    <h2>자가 점검</h2>
+    <ul class="checks">
+      <li><label><input type="checkbox" data-key="1"><span>토픽/서비스/액션의 용도 차이를 프로젝트 예시로 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="2"><span>새 터미널에서 환경을 잡고 talker/listener가 돈다.</span></label></li>
+      <li><label><input type="checkbox" data-key="3"><span>패키지를 colcon으로 빌드해 ros2 run으로 실행했다.</span></label></li>
+      <li><label><input type="checkbox" data-key="4"><span>오더 발행 → 가짜 AMR → 완료 회신 루프가 동작한다.</span></label></li>
+      <li><label><input type="checkbox" data-key="5"><span>echo/hz/rqt_graph로 시스템을 관측할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="6"><span>콜백에서 블로킹하면 안 되는 이유를 설명할 수 있다.</span></label></li>
+    </ul>
+
+    <nav class="pager" aria-label="스텝 이동">
+      <a href="step-3-data-pipeline.html"><span class="dir">← 이전</span><span class="t">Step 3 · 시계열 파이프라인</span></a>
+      <a class="next" href="step-5-isaac-sim.html"><span class="dir">다음 →</span><span class="t">Step 5 · Isaac Sim 입문</span></a>
+    </nav>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap wrap--narrow">기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2)</div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>

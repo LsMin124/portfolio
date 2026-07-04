@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 0 — 시스템 전체 그림과 용어 지도</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="step0">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">Phase A · 착수 전</span>
+  </div>
+</header>
+
+<main class="wrap wrap--narrow" style="--ph: var(--ph-a);">
+  <section class="step-hero">
+    <p class="step-hero__num">00</p>
+    <h1>시스템 전체 그림과 용어 지도</h1>
+    <div class="row">
+      <span class="badge badge--ph">개념</span>
+      <span class="badge">~2h</span>
+      <span class="badge">프로젝트 전체의 지도</span>
+      <span class="badge check-count" data-check-count></span>
+    </div>
+  </section>
+
+  <article class="prose">
+    <h2>학습 목표</h2>
+    <ul>
+      <li>v2 아키텍처의 모든 상자(구성요소)가 <strong>왜 존재하는지</strong> 한 문장씩 말할 수 있다.</li>
+      <li>반송 오더 하나가 시스템을 관통하는 전체 경로를 그릴 수 있다.</li>
+      <li>이후 스텝에서 나올 핵심 용어 20여 개를 미리 익혀 학습 마찰을 줄인다.</li>
+    </ul>
+
+    <div class="callout callout--why">
+      <span class="callout__tag">왜 이 스텝인가</span>
+      <p>부품을 만들 때 전체 조립도가 머리에 없으면 "지금 이걸 왜 배우지?"에서 동력이 샌다.
+      이 스텝은 v2 기획서 §4–5의 아키텍처를 학습자 시점으로 다시 그린 조립도다.</p>
+    </div>
+
+    <h2>전체 아키텍처, 학습자 버전</h2>
+    <div class="diagram" role="img" aria-label="시스템 아키텍처 다이어그램">
+┌─ 제품 1: manufacturing-twin ─────────────────────────────────┐
+│                                                              │
+│   [SimPy DES 코어]  ←── 오더/완료 이벤트 ──→  [Isaac Sim]     │
+│    · 라인 로직(스테이션·버퍼)              · 창고 씬(3D)      │
+│    · 반송 오더 발행                        · AMR 1~2대       │
+│    · what-if 실행기(수백 회 반복)          · ROS2 토픽/브리지 │
+│         │                                       │            │
+│         ├──→ [InfluxDB] ──→ [Grafana 대시보드]  │            │
+│         └──→ [OPC UA 경량 서버(외부 노출)]  ←───┘            │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+                          ▲ 조회 · 실험 · (승인 후) 제어
+┌─ 제품 2: factory-copilot ────────────────────────────────────┐
+│  [LangGraph 에이전트]                                         │
+│   플래너 → { 시계열 조회 / 병목 진단 / what-if 실험           │
+│              / 반송·설비 제어(승인 게이트) } → 근거 인용 응답  │
+└──────────────────────────────────────────────────────────────┘
+    </div>
+
+    <h2>핵심 설계 사상 세 가지</h2>
+    <h3>1. 시뮬레이터가 두 개인 이유 (코-시뮬레이션)</h3>
+    <p><strong>SimPy는 논리와 속도, Isaac은 물리와 눈.</strong>
+    "AMR을 3대로 늘리면?" 같은 질문에 답하려면 시나리오를 수백 번 돌려 통계를 내야 하는데,
+    물리 시뮬레이터로는 불가능한 속도다. 반대로 반송 로봇이 실제로 움직이는 모습과 물리적 거동은
+    DES가 못 보여준다. 그래서 둘을 <strong>오더/완료 이벤트만 주고받는 느슨한 결합</strong>으로 묶는다.
+    이 역할 분리를 설명할 수 있으면 면접 질문 1번(§10)은 끝난 것이다.</p>
+
+    <h3>2. what-if가 "지능형"의 실체</h3>
+    <p>에이전트가 단순 조회를 넘어 <strong>스스로 실험을 설계하고(변수·범위·반복수),
+    DES에서 실행하고, 신뢰구간과 함께 해석</strong>해서 답한다.
+    트윈의 존재 이유(시뮬레이션 기반 의사결정)를 자연어 인터페이스로 시연하는 것.</p>
+
+    <h3>3. 물리 상태 변경은 반드시 승인 게이트</h3>
+    <p>읽기(조회·진단·실험)는 자유, 쓰기(반송 오더 투입, 설비 파라미터 변경)는
+    실행 계획 제시 → 사용자 승인 → 실행. LangGraph의 인터럽트 기능으로 구현한다.
+    제조 현장 안전 서사의 핵심이다.</p>
+
+    <h2>반송 오더의 일생 — 데이터 흐름 내러티브</h2>
+    <p>구성요소를 외우지 말고, 오더 하나를 따라가라.</p>
+    <ol>
+      <li><strong>탄생</strong> — SimPy에서 스테이션 1이 가공을 마치면 "부품을 스테이션 2로 옮겨라"는 반송 오더가 발행된다.</li>
+      <li><strong>전달</strong> — 오더는 브리지를 거쳐 ROS2 토픽으로 발행된다 (예: <code>/transport/order</code>).</li>
+      <li><strong>수행</strong> — Isaac Sim의 AMR이 오더를 구독해 스테이션 1로 이동, 적재, 스테이션 2로 주행한다.</li>
+      <li><strong>보고</strong> — 도착하면 완료 이벤트가 ROS2 → 브리지 → SimPy로 회신되고, DES 라인 로직이 다음 공정을 진행한다.</li>
+      <li><strong>기록</strong> — 이 모든 이벤트(발행 시각, 완료 시각, AMR 상태)가 InfluxDB에 시계열로 적재되고 Grafana에 그려진다.</li>
+      <li><strong>노출</strong> — 트윈의 현재 상태 요약(처리량, 가동률)은 OPC UA 노드로도 노출된다 — 실물 설비와 연동 가능한 인터페이스의 증거.</li>
+      <li><strong>소비</strong> — 사용자가 에이전트에게 "오늘 반송 평균 얼마나 걸렸어?"라고 물으면 InfluxDB를 조회해 근거와 함께 답한다.</li>
+    </ol>
+
+    <h2>구성요소 ↔ 학습 스텝 매핑</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>구성요소</th><th>역할 (한 문장)</th><th>배우는 곳</th></tr></thead>
+        <tbody>
+          <tr><td>SimPy DES 코어</td><td>라인 로직·오더 발행·고속 what-if 반복 실행</td><td>Step 1, 2</td></tr>
+          <tr><td>InfluxDB / Grafana</td><td>모든 이벤트의 시계열 기록과 가시화</td><td>Step 3</td></tr>
+          <tr><td>ROS2</td><td>로봇 세계의 통신 규약 — 오더가 흐르는 길</td><td>Step 4</td></tr>
+          <tr><td>Isaac Sim</td><td>물리·3D 세계 — AMR이 실제로 움직이는 곳</td><td>Step 5</td></tr>
+          <tr><td>OPC UA 서버</td><td>산업 장비 세계에 트윈 상태를 노출하는 창구</td><td>Step 6</td></tr>
+          <tr><td>LangGraph 에이전트</td><td>자연어 → 도구 호출 → 근거 기반 응답의 두뇌</td><td>Step 7</td></tr>
+          <tr><td>평가 하네스</td><td>에이전트가 옳다는 것을 숫자로 증명</td><td>Step 8</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>용어 지도 — 앞으로 계속 나올 말들</h2>
+    <dl class="terms">
+      <div class="term"><dt>디지털 트윈</dt><dd>실물(또는 가상) 시스템의 상태를 데이터로 미러링하고, 시뮬레이션으로 미래를 실험할 수 있는 가상 대응물.</dd></div>
+      <div class="term"><dt>DES (이산사건 시뮬레이션)</dt><dd>시간이 연속으로 흐르지 않고 "다음 이벤트"로 점프하는 시뮬레이션. 대기·가공·고장 같은 로직에 최적.</dd></div>
+      <div class="term"><dt>코-시뮬레이션</dt><dd>서로 다른 시뮬레이터 두 개가 이벤트/데이터를 교환하며 함께 도는 구조.</dd></div>
+      <div class="term"><dt>what-if 실험</dt><dd>"파라미터를 바꾸면 결과가 어떻게 변하나"를 시뮬레이션 반복 실행으로 답하는 것.</dd></div>
+      <div class="term"><dt>AMR</dt><dd>Autonomous Mobile Robot. 경로를 스스로 계획해 주행하는 반송 로봇.</dd></div>
+      <div class="term"><dt>ROS2 노드/토픽</dt><dd>노드는 프로그램 단위, 토픽은 노드들이 pub/sub으로 메시지를 주고받는 이름 붙은 채널.</dd></div>
+      <div class="term"><dt>USD</dt><dd>Universal Scene Description. Omniverse/Isaac의 3D 씬 포맷이자 합성 체계.</dd></div>
+      <div class="term"><dt>Little의 법칙</dt><dd>L = λW. 시스템 내 평균 개체 수 = 도착률 × 평균 체류시간. 시뮬레이션 정합성 검증의 척도.</dd></div>
+      <div class="term"><dt>MTBF / MTTR</dt><dd>평균 고장 간격 / 평균 수리 시간. 설비 고장 모델의 두 파라미터.</dd></div>
+      <div class="term"><dt>OPC UA</dt><dd>산업 장비의 데이터·제어를 표준화된 주소공간으로 노출하는 프로토콜.</dd></div>
+      <div class="term"><dt>groundedness</dt><dd>LLM 응답의 주장이 도구가 계산한 근거 데이터에 실제로 기반한 정도.</dd></div>
+      <div class="term"><dt>승인 게이트 (HITL)</dt><dd>에이전트가 상태를 바꾸기 전 사람의 승인을 기다리는 중단점. Human-in-the-loop.</dd></div>
+    </dl>
+
+    <section class="mission" aria-labelledby="mission-h">
+      <span class="mission__tag">MISSION 00</span>
+      <h3 id="mission-h">조립도를 내 손으로 다시 그리기</h3>
+      <ol>
+        <li>v2 기획서(<code>intelligent-manufacturing-twin-plan.md</code>)를 처음부터 끝까지 정독한다.</li>
+        <li>기획서를 덮고, 백지에 아키텍처를 기억만으로 그린다. 상자마다 "왜 존재하는가"를 한 문장씩 단다.</li>
+        <li>기획서 §10의 면접 질문 6개에 소리 내어 답해본다. 막히는 질문을 기록해둔다 — 그게 약한 고리다.</li>
+        <li>위 다이어그램과 비교해 빠뜨린 상자·화살표를 확인한다.</li>
+      </ol>
+    </section>
+
+    <h2>자가 점검</h2>
+    <ul class="checks">
+      <li><label><input type="checkbox" data-key="1"><span>시뮬레이터가 두 개인 이유를 남에게 1분 안에 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="2"><span>반송 오더의 일생 7단계를 순서대로 말할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="3"><span>읽기 도구와 쓰기 도구(승인 게이트 대상)를 구분할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="4"><span>용어 지도의 12개 용어 중 10개 이상을 자기 말로 정의할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="5"><span>기억만으로 그린 아키텍처 그림이 실제와 대체로 일치했다.</span></label></li>
+    </ul>
+
+    <nav class="pager" aria-label="스텝 이동">
+      <a href="index.html"><span class="dir">← 커리큘럼</span><span class="t">전체 로드맵</span></a>
+      <a class="next" href="step-1-simpy.html"><span class="dir">다음 →</span><span class="t">Step 1 · SimPy 이산사건 시뮬레이션</span></a>
+    </nav>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap wrap--narrow">기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2)</div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>
