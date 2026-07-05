@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step 2b — 열-냉각 PID 제어</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="step2b">
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html"><span class="brand__mark" aria-hidden="true"></span>IM-Twin 사전 학습</a>
+    <span class="header-meta">Phase A · 착수 전 (v2 개정으로 신설)</span>
+  </div>
+</header>
+
+<main class="wrap wrap--narrow" style="--ph: var(--ph-a);">
+  <section class="step-hero">
+    <p class="step-hero__num">02b</p>
+    <h1>열-냉각 PID 제어 — 폐루프를 처음부터 끝까지</h1>
+    <div class="row">
+      <span class="badge badge--ph">코딩+제어</span>
+      <span class="badge">~6h</span>
+      <span class="badge">v2 §4.2(e) 직결 — 반나절 실습 = 모듈 초안</span>
+      <span class="badge check-count" data-check-count></span>
+    </div>
+  </section>
+
+  <article class="prose">
+    <h2>학습 목표</h2>
+    <ul>
+      <li>피드백(폐루프) 제어의 구조와 P·I·D 각 항의 역할을 설명할 수 있다.</li>
+      <li>1차 열 모델을 이산 시간으로 시뮬레이션하고, 직접 구현한 PID로 목표 온도를 추종시킨다.</li>
+      <li>anti-windup이 왜 필요한지 현상으로 보고 구현한다.</li>
+      <li>수동 튜닝 절차(P → I → D)로 게인을 잡고 정착시간·오버슈트를 측정한다.</li>
+      <li>열화 시나리오에서 SPC ±3σ 경보를 만들고 precision/recall로 채점한다.</li>
+    </ul>
+
+    <div class="callout callout--why">
+      <span class="callout__tag">프로젝트와의 연결 — v2 §4.2(e), 면접 방어 6·7·8번</span>
+      <p>v2 개정으로 열-냉각 PID 모듈이 코어에 들어왔다. 이 스텝의 실습 코드가 그 모듈의 초안이며,
+      "기계공학이 어디 쓰였나"의 첫 번째 답(모델링+제어)이 된다. 핵심 통찰 하나를 미리 심어두면 —
+      <strong>제어가 좋을수록 고장은 늦게 보인다. 그래서 온도가 아니라 제어 노력을 감시한다.</strong>
+      이 문장을 코드로 증명하는 것이 이 스텝의 종착지다.</p>
+    </div>
+
+    <h2>1. 폐루프의 해부 — 다섯 단어</h2>
+    <p><strong>목표(setpoint)</strong>와 <strong>측정(measurement)</strong>의 차이가 <strong>오차(error)</strong>이고,
+    제어기가 오차를 보고 <strong>조작량(u)</strong>을 계산해 <strong>플랜트(plant)</strong>에 가하면, 플랜트의 반응이
+    다시 측정으로 돌아온다. 개루프(정해진 출력을 틀어놓는 것)와의 차이는 단 하나 — <em>결과를 보고 스스로 고친다</em>는 것.</p>
+    <ul>
+      <li><strong>P (비례)</strong> — 지금 오차에 비례해 민다. 크면 빠르지만 진동하고, 혼자서는 정상상태 오차가 남는다.</li>
+      <li><strong>I (적분)</strong> — 오차의 누적을 민다. 정상상태 오차를 지워주지만, 과하면 출렁이고 포화와 만나면 windup 사고를 낸다.</li>
+      <li><strong>D (미분)</strong> — 오차의 변화 속도에 브레이크를 건다. 진동을 눌러주지만 노이즈에 민감하다.</li>
+    </ul>
+
+    <h2>2. 플랜트 — 1차 열 모델</h2>
+    <p>설비 온도의 최소 물리: 부하에 비례해 열이 들어오고, 냉각계가 온도차에 비례해 열을 내보낸다.
+    열용량 C로 나눠 적분하면 온도 궤적이 나온다 (오일러 적분, 시간 스텝 1분):</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>plant.py — 숫자는 전부 시작점, 튜닝이 과제다</div>
+      <pre><code>def step_plant(T, load, u, k_cool, dt=1.0, T_amb=25.0, C=40.0):
+    """1차 열 모델 한 스텝.
+    T: 현재 온도, load: 부하(0~1), u: 냉각 출력(0~1),
+    k_cool: 방열 효율 — 열화 시 이 값이 떨어진다."""
+    q_in  = 8.0 * load                    # 부하 비례 발열
+    q_out = k_cool * u * (T - T_amb)      # 냉각계 방출
+    return T + (q_in - q_out) * dt / C</code></pre>
+    </div>
+    <p>이 모델의 정직한 성질: u를 고정하면(개루프) 부하가 바뀔 때마다 온도가 표류한다.
+    미션 1번에서 이걸 직접 확인하고 시작하라 — 폐루프가 왜 필요한지 몸으로 알게 된다.</p>
+
+    <h2>3. 제어기 — 이산 PID와 anti-windup</h2>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>pid.py — 직동형 (과열이면 냉각을 올린다)</div>
+      <pre><code>class PID:
+    def __init__(self, kp, ki, kd, u_min=0.0, u_max=1.0):
+        self.kp, self.ki, self.kd = kp, ki, kd
+        self.u_min, self.u_max = u_min, u_max
+        self.integral = 0.0
+        self.prev_meas = None
+
+    def update(self, setpoint, meas, dt):
+        e = meas - setpoint          # 양수 = 과열 → 냉각 증가
+        d = 0.0
+        if self.prev_meas is not None:
+            d = (meas - self.prev_meas) / dt   # 측정값 미분(킥 방지)
+        self.prev_meas = meas
+
+        u_raw = self.kp * e + self.ki * self.integral + self.kd * d
+        u = min(max(u_raw, self.u_min), self.u_max)
+
+        if u == u_raw:               # 포화가 아닐 때만 적분 (anti-windup)
+            self.integral += e * dt
+        return u</code></pre>
+    </div>
+    <p>두 가지 실전 디테일이 이미 들어 있다:</p>
+    <ul>
+      <li><strong>측정값 미분</strong> — 오차 대신 측정값을 미분하면 목표값을 바꿀 때 D항이 튀는 "미분 킥"이 사라진다.</li>
+      <li><strong>조건부 적분(anti-windup)</strong> — 출력이 포화(0 또는 1에 붙음)된 동안에도 적분이 계속 쌓이면,
+      상황이 풀린 뒤 한참 동안 엉뚱한 출력을 낸다. 포화 중 적분을 멈추는 게 최소 처방. 미션에서 이걸 끄고 켜서 차이를 직접 봐라.</li>
+    </ul>
+
+    <h2>4. 수동 튜닝 — 절차를 문서화하는 것까지가 튜닝</h2>
+    <ol>
+      <li><strong>P만</strong> (Ki=Kd=0): Kp를 올려가며 응답을 본다. 빨라지다가 진동 직전이 되는 지점을 기록.</li>
+      <li><strong>I 추가</strong>: 남아 있는 정상상태 오차가 사라질 만큼만 Ki를 올린다. 출렁이면 과했다.</li>
+      <li><strong>D는 선택</strong>: 오버슈트가 거슬릴 때만 소량. 이 시스템(1차+느림)에선 0이어도 충분할 수 있다 — "왜 D를 안 썼나"도 답이 되는 설계 결정이다.</li>
+      <li>각 단계에서 <strong>정착시간, 최대 오버슈트, 정상상태 오차</strong>를 기록한다 — v2 §8의 실측 지표이고, 면접 방어 7번의 답이다.</li>
+    </ol>
+    <p>정석 기법이 궁금하면 Ziegler–Nichols를 검색해서 비교표 한 줄로 언급하라 — "수동 튜닝과 ZN 초기값을 비교했다"는 깊이의 증거가 된다.</p>
+
+    <h2>5. 열화, 그리고 제어가 고장을 가리는 현상</h2>
+    <p>여기가 이 스텝의 하이라이트다. 방열 효율 <code>k_cool</code>을 서서히 낮추면:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>degradation_run.py — 8시간 조업 + 4시간 뒤 열화 시작</div>
+      <pre><code>T, k_cool = 25.0, 1.0
+pid = PID(kp=0.08, ki=0.02, kd=0.0)      # 시작점 — 직접 튜닝할 것
+log = []
+
+for minute in range(480):
+    load = 0.8
+    if minute >= 240:                     # 열화 시작
+        k_cool = max(0.12, k_cool - 0.004)
+    u = pid.update(setpoint=60.0, meas=T, dt=1.0)
+    T = step_plant(T, load, u, k_cool)
+    log.append((minute, T, u, k_cool))</code></pre>
+    </div>
+    <p>그래프를 그려 보면 3막 구조가 보인다:</p>
+    <ol>
+      <li><strong>방어기</strong> — 열화가 시작돼도 온도는 멀쩡하다. 대신 냉각 출력 u가 슬금슬금 올라간다. <em>제어 노력 상승 추세가 유일한 조기 징후.</em></li>
+      <li><strong>포화</strong> — u가 1.0에 붙는다. 제어기가 할 수 있는 게 없어진다.</li>
+      <li><strong>이탈</strong> — 그제서야 온도가 목표를 벗어난다. 온도 경보는 <em>후행</em> 지표였던 것.</li>
+    </ol>
+
+    <h2>6. 경보와 채점 — SPC ±3σ, 그리고 오탐</h2>
+    <p>임계값은 감으로 정하지 않는다. <strong>정상 운전 구간(warm-up 이후 ~ 열화 전)의 평균과 표준편차</strong>로 관리한계를 세운다:</p>
+    <div class="code-card">
+      <div class="code-card__head"><span class="code-card__dots"><i></i><i></i><i></i></span>alarm.py — 온도·제어 노력 각각에 관리한계</div>
+      <pre><code>import numpy as np
+
+normal = [(T, u) for t, T, u, k in log if 60 &lt;= t &lt; 240]
+T_arr = np.array([x[0] for x in normal])
+u_arr = np.array([x[1] for x in normal])
+
+ucl_T = T_arr.mean() + 3 * T_arr.std(ddof=1)   # 온도 상한 관리한계
+ucl_u = u_arr.mean() + 3 * u_arr.std(ddof=1)   # 제어 노력 관리한계
+
+alarms_T = [t for t, T, u, k in log if T > ucl_T]
+alarms_u = [t for t, T, u, k in log if u > ucl_u]
+# 관측: alarms_u가 alarms_T보다 훨씬 먼저 울린다 (조기 vs 후행)</code></pre>
+    </div>
+    <p>채점은 반드시 쌍으로: 열화 구간(t ≥ 240)의 경보는 TP, 정상 구간의 경보는 FP로 놓고
+    <strong>precision / recall / 오경보 횟수 / 탐지 리드타임</strong>을 함께 보고한다.
+    리드타임만 보면 임계값을 낮춰 일찍 울리게 하는 치팅이 가능하고, 그 순간 FP가 폭증한다 —
+    이 트레이드오프를 표로 보여주는 것 자체가 면접 방어다 (v2 §8, 방어 7번).</p>
+
+    <div class="callout callout--warn">
+      <span class="callout__tag">흔한 함정</span>
+      <ul>
+        <li>anti-windup 없이 포화를 겪으면 회복이 이상하게 느리다 — 버그가 아니라 windup이다. 끄고 켜서 비교하라.</li>
+        <li>시간 스텝을 크게 잡으면(예: 10분) 멀쩡한 게인도 발산한다 — 이산화의 한계. dt를 줄여 확인.</li>
+        <li>열화(느린 추세)와 외란(부하 변동)을 혼동 — 경보 검증 시나리오에 부하 스텝 변화를 넣어 FP가 튀지 않는지 확인하라.</li>
+        <li>정상 구간 통계에 warm-up을 포함시키면 관리한계가 넓어져 recall이 죽는다 (Step 2의 교훈 재등판).</li>
+        <li>범위 팽창 — 전 스테이션 열 모델, 2차 모델, 자동 튜닝은 전부 확장이다. v2 원칙: ST2 1개, 1차 모델 고정.</li>
+      </ul>
+    </div>
+
+    <section class="mission" aria-labelledby="mission-h">
+      <span class="mission__tag">MISSION 02b</span>
+      <h3 id="mission-h">반나절 실습 — v2 §4.2(e)의 초안 만들기</h3>
+      <ol>
+        <li>플랜트만 개루프(u 고정)로 돌려 부하 변화에 온도가 표류하는 것을 확인한다.</li>
+        <li>PID를 닫고 수동 튜닝 절차(P→I→D)를 밟는다. 각 단계의 정착시간·오버슈트·정상상태 오차를 표로 기록.</li>
+        <li>anti-windup을 껐다 켜서 포화 후 회복 차이를 그래프로 남긴다.</li>
+        <li>열화 시나리오를 돌려 온도·냉각 출력·k_cool 3단 그래프로 "방어기 → 포화 → 이탈"을 재현한다.</li>
+        <li>SPC ±3σ 경보(온도·제어 노력 각각)를 구현하고 precision/recall/오경보/리드타임 표를 만든다 — 제어 노력 경보가 얼마나 먼저 울리는지가 핵심 결과.</li>
+        <li>이 코드를 <code>ThermalPID</code> 클래스로 정리해 Step 1의 SimPy 미니 라인 ST2에 붙이고, 온도·출력 이벤트를 Step 3의 InfluxDB 스키마에 추가한다.</li>
+      </ol>
+    </section>
+
+    <h2>자가 점검</h2>
+    <ul class="checks">
+      <li><label><input type="checkbox" data-key="1"><span>P·I·D 각 항의 역할과 부작용을 예를 들어 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="2"><span>수동 튜닝 절차를 밟았고 단계별 성능 표가 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="3"><span>anti-windup 유무의 차이를 그래프로 보였다.</span></label></li>
+      <li><label><input type="checkbox" data-key="4"><span>"방어기 → 포화 → 이탈" 3막을 재현했고, 제어가 고장을 가리는 이유를 설명할 수 있다.</span></label></li>
+      <li><label><input type="checkbox" data-key="5"><span>SPC 경보의 precision/recall 표가 있고, 제어 노력 경보의 조기성을 수치로 확인했다.</span></label></li>
+      <li><label><input type="checkbox" data-key="6"><span>ThermalPID 모듈이 SimPy 라인에 통합되어 돈다.</span></label></li>
+    </ul>
+
+    <nav class="pager" aria-label="스텝 이동">
+      <a href="step-2-production-theory.html"><span class="dir">← 이전</span><span class="t">Step 2 · 생산시스템 이론</span></a>
+      <a class="next" href="step-3-data-pipeline.html"><span class="dir">다음 →</span><span class="t">Step 3 · InfluxDB + Grafana 파이프라인</span></a>
+    </nav>
+  </article>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap wrap--narrow">기준 문서: <code>intelligent-manufacturing-twin-plan.md</code> (v2, 2026-07-05 개정)</div>
+</footer>
+
+<script src="assets/progress.js" defer></script>
+</body>
+</html>
